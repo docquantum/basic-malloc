@@ -167,12 +167,20 @@ void *mm_malloc(size_t size)
 
 /* 
  * mm_free - Free a block 
+ * 
+ * Given the alloced bit is set, get header and increment by 1
+ * since that essentially sets the bit to 1 or free, else print
+ * error to stderr.
  */
 /* $begin mmfree */
 void mm_free(void *bp)
 {
+	if(bp == NULL){
+		fprintf(stderr, "Error: memory not alloced or corrupted");
+	}
+
 	if(!GET_ALLOC(HDRP(bp))){
-		*(size_t *)(HDRP(bp)) = *(size_t *)(HDRP(bp)) + 1;
+		*HDRP(bp) = *HDRP(bp) | 1;
 	} else {
 		fprintf(stderr, "Error: memory not alloced or corrupted");
 	}
@@ -183,10 +191,14 @@ void mm_free(void *bp)
 
 /*
  * mm_realloc - naive implementation of mm_realloc
+ * 
+ * Given an alloced pointer, get size, add to that size, pass to malloc to
+ * get new block.
+ * 
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-	/* You need to implement this function. */
+	
 	return NULL;
 }
 
