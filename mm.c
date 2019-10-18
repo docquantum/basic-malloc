@@ -123,40 +123,45 @@ int mm_init(void)
 /* $begin mmmalloc */
 void *mm_malloc(size_t size) 
 {
-    size_t asize;      /* adjusted block size */
-    size_t extendsize; /* amount to extend heap if no fit */
-    char *bp;      
-	//	printf("call mm_malloc\n");
+	size_t asize;      /* adjusted block size */
+	size_t extendsize; /* amount to extend heap if no fit */
+	char *bp;      
+	
+	//printf("call mm_malloc\n");
 
-    /* Ignore spurious requests */
-    if (size <= 0)
+	/* Ignore spurious requests */
+	if (size <= 0)
 		return NULL;
 
-    /* Adjust block size to include overhead and alignment reqs. */
-    if (size <= WSIZE)
+	/* Adjust block size to include overhead and alignment reqs. */
+	if (size <= WSIZE)
 		asize = WSIZE + OVERHEAD;
-    else
+	else
 		asize = DSIZE * ((size + (OVERHEAD) + (DSIZE-1)) / DSIZE);
-	 //printf("asize = %d\n", asize);
-    
-    /* Search the free list for a fit */
-    if ((bp = find_fit(asize)) != NULL) {
+	
+	//printf("asize = %d\n", asize);
+
+	/* Search the free list for a fit */
+	if ((bp = find_fit(asize)) != NULL) {
 		place(bp, asize);
 		return bp;
-    }
+	}
 
-    /* No fit found. Get more memory and place the block */
-    extendsize = MAX(asize,CHUNKSIZE);
-	 //printf("extendsize = %d\n", extendsize);
-    if ((bp = extend_heap(extendsize/WSIZE)) == NULL)
-	 {
-	 	printf("mm_malloc = NULL\n");
+	/* No fit found. Get more memory and place the block */
+	extendsize = MAX(asize,CHUNKSIZE);
+	//printf("extendsize = %d\n", extendsize);
+	if ((bp = extend_heap(extendsize/WSIZE)) == NULL) {
+		printf("mm_malloc = NULL\n");
 		return NULL;
-	 }
-	 //printf("return address = %p\n", bp);
-    place(bp, asize);
-	 //mm_checkheap(1);
-    return bp;
+	}
+
+	//printf("return address = %p\n", bp);
+
+	place(bp, asize);
+
+	//mm_checkheap(1);
+
+	return bp;
 } 
 /* $end mmmalloc */
 
@@ -166,9 +171,12 @@ void *mm_malloc(size_t size)
 /* $begin mmfree */
 void mm_free(void *bp)
 {
-	//printf("call mm_free\n");
-
-	/* You need to implement this function */
+	if(!GET_ALLOC(HDRP(bp))){
+		*(size_t *)(HDRP(bp)) = *(size_t *)(HDRP(bp)) + 1;
+	} else {
+		fprintf(stderr, "Error: memory not alloced or corrupted");
+	}
+		
 }
 
 /* $end mmfree */
@@ -237,17 +245,17 @@ static void *extend_heap(size_t words)
 static void place(void *bp, size_t asize)
 /* $end mmplace-proto */
 {
-    size_t csize = GET_SIZE(HDRP(bp));   
+	size_t csize = GET_SIZE(HDRP(bp));   
 	// printf("csize = %d\n", csize);
 
-   if ((csize - asize) >= (DSIZE)) { 
-	PUT(HDRP(bp), PACK(asize, 0));
-	bp = NEXT_BLKP(bp);
-	PUT(HDRP(bp), PACK(csize-asize, 1));
-    }
-    else { 
-	PUT(HDRP(bp), PACK(csize, 0));
-    }
+	if ((csize - asize) >= (DSIZE)) {
+		PUT(HDRP(bp), PACK(asize, 0));
+		bp = NEXT_BLKP(bp);
+		PUT(HDRP(bp), PACK(csize-asize, 1));
+	}
+	else { 
+		PUT(HDRP(bp), PACK(csize, 0));
+	}
 }
 /* $end mmplace */
 
