@@ -37,20 +37,11 @@
 team_t team = {
 	/* Team name */
 	"Daniel Shchur",
-	/* note that we will add a 10% bonus for
-	* working alone */
-	/* the maximum number of members per team
-	 * is four */
-	/* First member's full name */
+	/* Full name */
 	"Daniel Shchur",
-	/* First member's email address */
+	/* Email address */
 	"daniel.shchur@huskers.unl.edu",
-	/* Second member's full name (leave
-	* blank if none) */
-	"",
-	/* Second member's email address
-	* (leave blank if none) */
-	""
+	"",""
 };
 
 
@@ -93,6 +84,7 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void printblock(void *bp);
+static void mm_coalesce(void *bp);
 
 /* 
  * mm_init - Initialize the memory manager 
@@ -180,7 +172,8 @@ void mm_free(void *bp)
 	}
 
 	if(!GET_ALLOC(HDRP(bp))){
-		*HDRP(bp) = *HDRP(bp) | 1;
+		*HDRP(bp) |= 1;
+		mm_coalesce(bp);
 	} else {
 		fprintf(stderr, "Error: memory not alloced or corrupted");
 	}
@@ -188,6 +181,40 @@ void mm_free(void *bp)
 }
 
 /* $end mmfree */
+
+/**
+ * mm_coalesce - Coalesce the freespace around a block
+ * 
+ * Given a block pointer that has been freed, find empty
+ * blocks near it to be combined into a large free chunk.
+ * 
+ * TODO: coalesce previous chunks
+ */
+static void mm_coalesce(void *bp)
+{	
+	//find next block
+	unsigned int nSize = 0;
+	if (GET_ALLOC(HDRP(NEXT_BLKP(bp)))) {
+		nSize = GET_SIZE(NEXT_BLKP(bp));
+	}
+	//find previous block
+	char * prev;
+	unsigned int pSize = 0;
+	for (prev = heap_listp; GET_SIZE(prev-WSIZE) > 0; prev = NEXT_BLKP(prev)) {
+		if (GET_ALLOC(HDRP(prev)) && NEXT_BLKP(prev) == bp) {
+			pSize = GET_SIZE(HDRP(prev));
+	    	break;
+		}
+    }
+
+	if(pSize > 0){
+		PUT(prev, PACK( pSize + nSize + GET_SIZE(HDRP(bp)), 1));
+		return;
+	} else if(nSize > 0){
+		PUT(bp, PACK(nSize + GET_SIZE(HDRP(bp)), 1));
+		return;
+	}
+}
 
 /*
  * mm_realloc - naive implementation of mm_realloc
