@@ -85,6 +85,7 @@ static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void printblock(void *bp);
 static void mm_coalesce(void *bp);
+static void mm_memcpy(void * dest, void * src);
 
 /* 
  * mm_init - Initialize the memory manager 
@@ -151,7 +152,7 @@ void *mm_malloc(size_t size)
 
 	place(bp, asize);
 
-	//mm_checkheap(1);
+	mm_checkheap(0);
 
 	return bp;
 } 
@@ -177,6 +178,7 @@ void mm_free(void *bp)
 	} else {
 		fprintf(stderr, "Error: memory not alloced or corrupted");
 	}
+	mm_checkheap(0);
 		
 }
 
@@ -188,30 +190,32 @@ void mm_free(void *bp)
  * Given a block pointer that has been freed, find empty
  * blocks near it to be combined into a large free chunk.
  * 
- * TODO: coalesce previous chunks
  */
 static void mm_coalesce(void *bp)
 {	
-	//find next block
-	unsigned int nSize = 0;
-	if (GET_ALLOC(HDRP(NEXT_BLKP(bp)))) {
-		nSize = GET_SIZE(NEXT_BLKP(bp));
-	}
 	//find previous block
 	char * prev;
-	unsigned int pSize = 0;
 	for (prev = heap_listp; GET_SIZE(prev-WSIZE) > 0; prev = NEXT_BLKP(prev)) {
-		if (GET_ALLOC(HDRP(prev)) && NEXT_BLKP(prev) == bp) {
-			pSize = GET_SIZE(HDRP(prev));
+		if (NEXT_BLKP(prev) == bp) {
 	    	break;
 		}
     }
 
-	if(pSize > 0){
-		PUT(prev, PACK( pSize + nSize + GET_SIZE(HDRP(bp)), 1));
+	size_t nextBlock = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+	size_t prevBlock = GET_ALLOC(HDRP(prev));
+	size_t size = GET_SIZE(HDRP(bp));
+
+	if(prevBlock && nextBlock){
+		size += GET_SIZE(HDRP(prev)) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
+		PUT(HDRP(prev), PACK(size, 1));
 		return;
-	} else if(nSize > 0){
-		PUT(bp, PACK(nSize + GET_SIZE(HDRP(bp)), 1));
+	} else if(prevBlock && !nextBlock){
+		size += GET_SIZE(HDRP(prev));
+		PUT(HDRP(prev), PACK(size, 1));
+		return;
+	} else if(!prevBlock && nextBlock){
+		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+		PUT(HDRP(bp), PACK(size, 1));
 		return;
 	}
 }
@@ -225,8 +229,105 @@ static void mm_coalesce(void *bp)
  */
 void *mm_realloc(void *ptr, size_t size)
 {
-	
+	/**
+	 * 1. if ptr is NULL, the call is equivalent to mm malloc(size);
+	 * 2. if size is equal to zero, the call is equivalent to mm free(ptr);
+	 * 3. if ptr is not NULL, it must have been returned by an earlier call to mm malloc or mm realloc.
+	 * 
+	 * The call to mm realloc changes the size of the memory block pointed to by ptr (the old block)
+	 * to size bytes and returns the address of the new block. Notice that the address of the 
+	 * new block might be the same as the old block, or it might be different, depending on your
+	 * implementation, the amount of internal fragmentation in the old block, and the size of the
+	 * realloc request. The contents of the new block are the same as those of the old ptr block, up
+	 * to the minimum of the old and new sizes. Everything else is uninitialized.
+	 * 
+	 * For example, if the old block is 8 bytes and the new block is 12 bytes, then the first 8 bytes
+	 * of the new block are identical to the first 8 bytes of the old block and the last 4 bytes are
+	 * uninitialized.
+	 * 
+	 * Similarly, if the old block is 8 bytes and the new block is 4 bytes, then the
+	 * contents of the new block are identical to the first 4 bytes of the old block.
+	 */
+
+	if(ptr == NULL && size > 0){
+		return mm_malloc(size);
+	} else if(ptr != NULL && size == 0) {
+		mm_free(ptr);
+		return NULL;
+	} else if(ptr != NULL && size > 0) {
+		size_t oldSize = GET_SIZE(HDRP(ptr));
+
+		/* Adjust block size to include overhead and alignment reqs. */
+		if (size <= WSIZE) {
+			size = WSIZE + OVERHEAD;
+		}
+		else {
+			size = DSIZE * ((size + OVERHEAD + DSIZE - 1) / DSIZE);
+		}
+
+		// if sizes are the same or the difference is less than a DSIZE, no changes needed
+		if(oldSize == size || (oldSize - size <= WSIZE)) {
+			return ptr;
+		} else {
+			
+			// If size is less than old size, shrink and free end
+			if(size < oldSize) {
+				if ((oldSize - size) >= DSIZE) {
+					PUT(HDRP(ptr), PACK(size, 0));
+					PUT(HDRP(NEXT_BLKP(ptr)), PACK(oldSize-size, 1));
+					mm_coalesce(NEXT_BLKP(ptr));
+				}
+				else { 
+					PUT(HDRP(ptr), PACK(oldSize, 0));
+				}
+				return ptr;
+			}
+			
+			// If size is greater than old size, grow and free end
+			else if(size > oldSize) {
+				size_t nextSize = GET_SIZE(HDRP(NEXT_BLKP(ptr))) + oldSize;
+				if(GET_ALLOC(HDRP(NEXT_BLKP(ptr))) && nextSize >= size){
+					if ((nextSize - size) >= DSIZE) {
+						PUT(HDRP(ptr), PACK(size, 0));
+						PUT(HDRP(NEXT_BLKP(ptr)), PACK(nextSize-size, 1));
+						mm_coalesce(NEXT_BLKP(ptr));
+					}
+					else { 
+						PUT(HDRP(ptr), PACK(nextSize, 0));
+					}
+					
+					return ptr;
+				}
+				// else malloc
+				void * newPtr;
+				if((newPtr = mm_malloc(size)) == NULL){
+					return NULL;
+				}
+				// copy memory
+				mm_memcpy(newPtr, ptr);
+				// free
+				mm_free(ptr);
+				return newPtr;
+			}
+
+		}
+	}
+
 	return NULL;
+}
+
+/**
+ * mm_memcpy - copies memory to destination from source
+ * 
+ * Memory is coppied block by block and truncated if
+ * destination is smaller than source
+ */ 
+
+void mm_memcpy(void * dest, void * src)
+{
+	for(size_t i = 0; i < GET_SIZE(HDRP(dest))-OVERHEAD; i++){
+		((char *) dest)[i] = ((char *) src)[i];
+	}
 }
 
 /* 
