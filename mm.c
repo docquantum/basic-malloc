@@ -245,8 +245,6 @@ void *mm_realloc(void *ptr, size_t size)
 	 * contents of the new block are identical to the first 4 bytes of the old block.
 	 */
 
-	return NULL;
-
 	if(ptr == NULL && size > 0){
 		return mm_malloc(size);
 	} else if(ptr != NULL && size == 0) {
@@ -256,30 +254,25 @@ void *mm_realloc(void *ptr, size_t size)
 		size_t oldSize = GET_SIZE(HDRP(ptr));
 
 		/* Adjust block size to include overhead and alignment reqs. */
-		if (size <= WSIZE) {
-			size = WSIZE + OVERHEAD;
+		if (size <= DSIZE) {
+			size = MINSIZE;
 		}
 		else {
 			size = DSIZE * ((size + OVERHEAD + DSIZE - 1) / DSIZE);
 		}
 
-		// if sizes are the same or the difference is less than a DSIZE, no changes needed
-		if(oldSize == size || (oldSize - size <= WSIZE)) {
+		// if sizes are the same or the difference is less than a MINSIZE, no changes needed
+		if(oldSize == size || (oldSize - size < MINSIZE)) {
 			return ptr;
 		} else {
 			
 			// If size is less than old size, shrink and free end
 			if(size < oldSize) {
-				if ((oldSize - size) >= DSIZE) {
-					PUT(HDRP(ptr), PACK(size, 0));
-					PUT(FTRP(ptr), PACK(size, 0));
-					PUT(HDRP(NEXT_BLKP(ptr)), PACK(oldSize-size, 1));
-					PUT(FTRP(NEXT_BLKP(ptr)), PACK(oldSize-size, 1));
-				}
-				else { 
-					PUT(HDRP(ptr), PACK(oldSize, 0));
-					PUT(FTRP(ptr), PACK(oldSize, 0));
-				}
+				PUT(HDRP(ptr), PACK(size, 0));
+				PUT(FTRP(ptr), PACK(size, 0));
+				PUT(HDRP(NEXT_BLKP(ptr)), PACK(oldSize-size, 1));
+				PUT(FTRP(NEXT_BLKP(ptr)), PACK(oldSize-size, 1));
+				add_to_list(NEXT_BLKP(ptr));
 				return ptr;
 			}
 			
@@ -287,13 +280,16 @@ void *mm_realloc(void *ptr, size_t size)
 			else if(size > oldSize) {
 				size_t nextSize = GET_SIZE(HDRP(NEXT_BLKP(ptr))) + oldSize;
 				if(GET_ALLOC(HDRP(NEXT_BLKP(ptr))) && nextSize >= size){
-					if ((nextSize - size) >= DSIZE) {
+					if ((nextSize - size) >= MINSIZE) {
+						remove_from_list(NEXT_BLKP(ptr));
 						PUT(HDRP(ptr), PACK(size, 0));
 						PUT(FTRP(ptr), PACK(size, 0));
 						PUT(HDRP(NEXT_BLKP(ptr)), PACK(nextSize-size, 1));
 						PUT(FTRP(NEXT_BLKP(ptr)), PACK(nextSize-size, 1));
+						add_to_list(NEXT_BLKP(ptr));
 					}
 					else { 
+						remove_from_list(NEXT_BLKP(ptr));
 						PUT(HDRP(ptr), PACK(nextSize, 0));
 						PUT(FTRP(ptr), PACK(nextSize, 0));
 					}
