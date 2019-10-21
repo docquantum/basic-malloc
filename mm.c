@@ -641,16 +641,32 @@ static void *find_fit(size_t asize)
 		return NULL;
 	}
 
-    /* first fit search */
+    /* Next fit search */
 	void *bp = free_listp;
+	void *bestP = bp;
+	void *first = NULL;
+	short flag = 0;
 	do {
-		if (asize <= GET_SIZE(HDRP(bp))) {
-	    	return bp;
+		if (GET_SIZE(HDRP(bp)) >= asize) {
+			if(GET_SIZE(HDRP(bestP)) > GET_SIZE(HDRP(bp))){
+				bestP = bp;
+				flag++;
+			}
+			if(!flag){
+				first = bp;
+				flag = 1;
+			}
+			if(flag == 2){
+				break;
+			}
 		}
-		if((bp = GET_NEXT_FREE(bp)) == NULL){
-			return NULL;
-		}
+		bp = GET_PREV_FREE(bp);
 	} while(bp != free_listp);
+	if(asize <= GET_SIZE(HDRP(bestP))){
+		return bestP;
+	} else if(first != NULL){
+		return first;
+	}
     return NULL; /* no fit */
 }
 
