@@ -111,7 +111,6 @@ static void *extend_heap(size_t words);
 static void place(void *bp, size_t asize);
 static void *find_fit(size_t asize);
 static void printblock(void *bp);
-static int mm_coalesce(void *bp);
 static void mm_memcpy(void * dest, void * src);
 static void add_to_list(void* bp);
 static void remove_from_list(void* bp);
@@ -169,6 +168,7 @@ void *mm_malloc(size_t size)
 	/* Search the free list for a fit */
 	if ((bp = find_fit(asize)) != NULL) {
 		place(bp, asize);
+		//mm_checkheap(0);
 		return bp;
 	}
 
@@ -180,6 +180,8 @@ void *mm_malloc(size_t size)
 	}
 
 	place(bp, asize);
+
+	//mm_checkheap(0);
 
 	return bp;
 } 
@@ -200,15 +202,11 @@ void mm_free(void *bp)
 		return;
 	}
 
-	// If allocated...
+	// If allocated, free
 	if(!GET_ALLOC(HDRP(bp))){
-		// try to coalesce...
-		if(mm_coalesce(bp)){
-			// else free
-			*HDRP(bp) |= 1;
-			*FTRP(bp) |= 1;
-			add_to_list(bp);
-		}
+		*HDRP(bp) |= 1;
+		*FTRP(bp) |= 1;
+		add_to_list(bp);
 	} else {
 		fprintf(stderr, "mm_free(): memory not alloced or corrupted");
 		return;
@@ -217,42 +215,6 @@ void mm_free(void *bp)
 }
 
 /* $end mmfree */
-
-/**
- * mm_coalesce - Coalesce the freespace around a block
- * 
- * Given a block pointer that has been freed, find empty
- * blocks near it to be combined into a large free chunk.
- * 
- * Returns 0 on success, 1 on failure
- * 
- */
-static int mm_coalesce(void *bp)
-{	
-	return 1;
-
-	size_t nextBlock = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-	size_t prevBlock = GET_ALLOC(HDRP(PREV_BLKP(bp)));
-	size_t size = GET_SIZE(HDRP(bp));
-
-	if(prevBlock && nextBlock){
-		size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(NEXT_BLKP(bp)));
-		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 1));
-		PUT(FTRP(PREV_BLKP(bp)), PACK(size, 1));
-		return 0;
-	} else if(prevBlock && !nextBlock){
-		size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-		PUT(HDRP(PREV_BLKP(bp)), PACK(size, 1));
-		PUT(FTRP(PREV_BLKP(bp)), PACK(size, 1));
-		return 0;
-	} else if(!prevBlock && nextBlock){
-		size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-		PUT(HDRP(bp), PACK(size, 1));
-		PUT(FTRP(bp), PACK(size, 1));
-		return 0;
-	}
-	return 1;
-}
 
 /*
  * mm_realloc - naive implementation of mm_realloc
@@ -313,7 +275,6 @@ void *mm_realloc(void *ptr, size_t size)
 					PUT(FTRP(ptr), PACK(size, 0));
 					PUT(HDRP(NEXT_BLKP(ptr)), PACK(oldSize-size, 1));
 					PUT(FTRP(NEXT_BLKP(ptr)), PACK(oldSize-size, 1));
-					mm_coalesce(NEXT_BLKP(ptr));
 				}
 				else { 
 					PUT(HDRP(ptr), PACK(oldSize, 0));
@@ -331,7 +292,6 @@ void *mm_realloc(void *ptr, size_t size)
 						PUT(FTRP(ptr), PACK(size, 0));
 						PUT(HDRP(NEXT_BLKP(ptr)), PACK(nextSize-size, 1));
 						PUT(FTRP(NEXT_BLKP(ptr)), PACK(nextSize-size, 1));
-						mm_coalesce(NEXT_BLKP(ptr));
 					}
 					else { 
 						PUT(HDRP(ptr), PACK(nextSize, 0));
@@ -437,9 +397,9 @@ void mm_checkheap(int verbose)
 }
 
 /**
- * add_to_list - Adds free block to list
+ * add_to_list - Adds free block to list and coalesces
  * 
- * Will try to add block in address order
+ * Will try to add block in address order, or combine
  */
 static void add_to_list(void* bp){
 
@@ -462,6 +422,21 @@ static void add_to_list(void* bp){
 	
 	// case for 1 node in list.
 	if(free_listp == GET_NEXT_FREE(free_listp)){
+		//make sure they're not next to eachother
+		if((char *) NEXT_BLKP(bp) == free_listp){
+			size_t size = GET_SIZE(HDRP(free_listp)) + GET_SIZE(HDRP(bp));
+			PUT(HDRP(bp), PACK(size, 1));
+			PUT(FTRP(bp), PACK(size, 1));
+			free_listp = bp;
+			SET_NEXT_FREE(free_listp, free_listp);
+			SET_PREV_FREE(free_listp, free_listp);
+			return;
+		} else if((char *) PREV_BLKP(bp) == free_listp){
+			size_t size = GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(HDRP(bp));
+			PUT(HDRP(free_listp), PACK(size, 1));
+			PUT(FTRP(free_listp), PACK(size, 1));
+			return;
+		}
 		// Set head next to new
 		SET_NEXT_FREE(free_listp, bp);
 		// Set pre prev as new
@@ -482,7 +457,33 @@ static void add_to_list(void* bp){
 	{	
 		if((char *) bp > node){
 			if((char *) bp < GET_NEXT_FREE(node) || node > GET_NEXT_FREE(node)){
-				//printf("Adding %p between %p -> %p\n\n", bp, node, GET_NEXT_FREE(node));
+				if((char *) PREV_BLKP(bp) == node && (char *) NEXT_BLKP(bp) == GET_NEXT_FREE(node)){
+					size_t size = GET_SIZE(HDRP(node)) + GET_SIZE(HDRP(bp)) + GET_SIZE(HDRP(GET_NEXT_FREE(node)));
+					PUT(HDRP(node), PACK(size, 1));
+					PUT(FTRP(node), PACK(size, 1));
+					remove_from_list(GET_NEXT_FREE(node));
+					free_listp = node;
+					return;
+				} else if((char *) PREV_BLKP(bp) == node && (char *) NEXT_BLKP(bp) != GET_NEXT_FREE(node) && GET_ALLOC(HDRP(NEXT_BLKP(bp)))){
+					size_t size = GET_SIZE(HDRP(node)) + GET_SIZE(HDRP(bp));
+					PUT(HDRP(node), PACK(size, 1));
+					PUT(FTRP(node), PACK(size, 1));
+					free_listp = node;
+					return;
+				} else if((char *) PREV_BLKP(bp) != node && (char *) NEXT_BLKP(bp) == GET_NEXT_FREE(node)){
+					size_t size = GET_SIZE(HDRP(bp)) + GET_SIZE(HDRP(GET_NEXT_FREE(node)));
+					PUT(HDRP(bp), PACK(size, 1));
+					PUT(FTRP(bp), PACK(size, 1));
+					char * old = GET_NEXT_FREE(node);
+					// set next to the next of next-next
+					SET_NEXT_FREE(bp, GET_NEXT_FREE(old));
+					// set the prev of next-next node to bp
+					SET_PREV_FREE(GET_NEXT_FREE(old), bp);
+					SET_PREV_FREE(bp, node);
+					SET_NEXT_FREE(node, bp);
+					free_listp = node;
+					return;
+				}
 				/* bp inserted after node */
 				// Set new next as current next
 				SET_NEXT_FREE(bp, GET_NEXT_FREE(node));
@@ -500,7 +501,36 @@ static void add_to_list(void* bp){
 		}
 		else if((char *) bp < node){
 			if((char *) bp > GET_PREV_FREE(node) || node < GET_PREV_FREE(node)){
-				//printf("Adding %p between %p -> %p\n\n", bp, GET_PREV_FREE(node), node);
+				if((char *) NEXT_BLKP(bp) == node && (char *) PREV_BLKP(bp) == GET_PREV_FREE(node)){
+					node = GET_PREV_FREE(node);
+					size_t size = GET_SIZE(HDRP(node)) + GET_SIZE(HDRP(bp)) + GET_SIZE(HDRP(GET_NEXT_FREE(node)));
+					PUT(HDRP(node), PACK(size, 1));
+					PUT(FTRP(node), PACK(size, 1));
+					remove_from_list(GET_NEXT_FREE(node));
+					free_listp = node;
+					return;
+				} else if((char *) PREV_BLKP(bp) == GET_PREV_FREE(node) && (char *) NEXT_BLKP(bp) != node){
+					node = GET_PREV_FREE(node);
+					size_t size = GET_SIZE(HDRP(node)) + GET_SIZE(HDRP(bp));
+					PUT(HDRP(node), PACK(size, 1));
+					PUT(FTRP(node), PACK(size, 1));
+					free_listp = node;
+					return;
+				} else if((char *) NEXT_BLKP(bp) == node && (char *) PREV_BLKP(bp) != GET_PREV_FREE(node)){
+					node = GET_PREV_FREE(node);
+					size_t size = GET_SIZE(HDRP(bp)) + GET_SIZE(HDRP(GET_NEXT_FREE(node)));
+					PUT(HDRP(bp), PACK(size, 1));
+					PUT(FTRP(bp), PACK(size, 1));
+					char * old = GET_NEXT_FREE(node);
+					// set next to the next of next-next
+					SET_NEXT_FREE(bp, GET_NEXT_FREE(old));
+					// set the prev of next-next node to bp
+					SET_PREV_FREE(GET_NEXT_FREE(old), bp);
+					SET_PREV_FREE(bp, node);
+					SET_NEXT_FREE(node, bp);
+					free_listp = node;
+					return;
+				}
 				/* bp inserted before node */
 				// Set new next to node
 				SET_NEXT_FREE(bp, node);
@@ -570,8 +600,8 @@ static void *extend_heap(size_t words)
     /* Initialize free block and the epilogue header */
     PUT(HDRP(bp), PACK(size, 1));			/* free block header */
 	PUT(FTRP(bp), PACK(size, 1));			/* free block footer */
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(8, 0));	/* new epilogue header */
 	add_to_list(bp);
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 0));	/* new epilogue header */
     return bp;
 }
 /* $end mmextendheap */
